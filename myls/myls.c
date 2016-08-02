@@ -1,5 +1,5 @@
 //a simple ls demo 
-//support -1aA options
+//support -1aAU options
 #include <sys/stat.h>
 #include <stdio.h>
 #include <dirent.h>
@@ -83,7 +83,7 @@ void getTerminatorSize(int *cols, int *lines); // 获取终端的行数和列数
 void calculate_single_col_len(void); //计算每列的宽度
 int calculate_length_of_filename_and_frills(struct dirent *file); // 计算响应文件占用的长度
 struct pending_file *move_pointer_n_times(struct pending_file *p, int n); //移动n次
-void print_file_name_and_frills(struct dirent *dir, int pos); //输出单个数据
+void print_file_name_and_frills(const struct dirent *dir, int pos); //输出单个数据
 
 int main(int argc, char const *argv[])
 {
@@ -212,6 +212,7 @@ void parse_options(char* options) {
 		case 'a': _a_not_ignore_dot = true; break;
 		case '1': display_patern = one_item_per_line; break;
 		case 'A': _A_ignore_dotdot = true; break;
+		case 'U': sort_type = sort_none; break;
 		default: break;
 		}
 	}
@@ -342,6 +343,7 @@ struct pending_file *move_pointer_n_times(struct pending_file *p, int n) {
 	}
 	return p;
 }
-void print_file_name_and_frills(struct dirent *dir, int pos) {
+void print_file_name_and_frills(const struct dirent *dir, int pos) {
 	printf("%*s", -pos, dir->d_name);
+	fflush(stdout);
 }
