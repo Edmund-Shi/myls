@@ -1,5 +1,5 @@
 //a simple ls demo 
-//support -1aAU options
+//support -1acAU options
 #include <sys/stat.h>
 #include <stdio.h>
 #include <dirent.h>
@@ -9,6 +9,9 @@
 
 
 #define MAX(X,Y) ((X)>(Y)?(X):(Y)) 
+
+//the max length of a single row
+#define MAX_BUF_LEN 80
 
 enum filetype {
 	unknown,
@@ -42,7 +45,9 @@ static bool _A_ignore_dotdot;
 //记录所有等待被显示的文件
 struct pending_file
 {
+	char file_path[MAX_BUF_LEN]; //the file path, include the file name
 	struct dirent *dir;
+	struct stat file_stat; //get this info in readdir_to_pending()
 	struct pending_file *next;
 };
 struct pending_file *pending_file; //第一个节点是空节点
@@ -56,6 +61,7 @@ enum sort_type
 	sort_size,			/* -S */
 	sort_version,		/* -v */
 	sort_time,			/* -t */
+	sort_inode_time,    /* -c */
 	sort_numtypes		/* the number of elements of this enum */
 };
 static enum sort_type sort_type;
@@ -72,6 +78,8 @@ struct output_format {
 struct output_format output_format;
 
 static int tab_size = 2; //默认的间隔宽度
+
+static char input_dir_name[MAX_BUF_LEN];
 
 void print_dir(const char *dir_name); //打印指定目录
 void initial_pattern(void); //初始化各种参数
@@ -90,15 +98,18 @@ int main(int argc, char const *argv[])
 	initial_pattern();
 
 	if (argc == 1) { // ls 无参数
+		strcpy(input_dir_name, ".");
 		print_dir(".");
 	}
 	else if (argc == 2) {
 		//只含有目录 或 选项
 		if (argv[1][0] == '-') { // ls -option
 			parse_options(argv[1]);
+			strcpy(input_dir_name, ".");
 			print_dir(".");
 		}
 		else { // ls dir
+			strcpy(input_dir_name, argv[1]);
 			print_dir(argv[1]);
 		}
 
@@ -106,6 +117,7 @@ int main(int argc, char const *argv[])
 	else {
 		//ls [-option] [dir]
 		parse_options(argv[1]);
+		strcpy(input_dir_name, argv[2]);
 		print_dir(argv[2]);
 	}
 	return 0;
@@ -184,6 +196,7 @@ char get_option(char* argv) {
 void readdir_to_pending(char * dir_name) {
 	DIR *dir_p;
 	struct dirent *dir;
+	
 	dir_p = opendir(dir_name);
 	struct pending_file * pending_tail;
 	pending_tail = pending_file; // 链表尾
@@ -201,7 +214,20 @@ void readdir_to_pending(char * dir_name) {
 		pending_tail->next = (struct pending_file*)malloc(sizeof(struct pending_file));
 		pending_tail = pending_tail->next;
 		pending_tail->dir = dir;
-		pending_tail->next = NULL;
+		pending_tail->next = NULL;	
+
+		// add the file_path 
+		char path[MAX_BUF_LEN];
+		strcpy(path, input_dir_name);
+		strcat(path, "/");
+		strcat(path, pending_tail->dir->d_name);
+		strcpy(pending_tail->file_path, path);
+
+		//add file_stat
+		if (lstat(pending_tail->file_path,&(pending_tail->file_stat)) < 0){
+			printf("Error with lstat");
+			exit(0);
+		}
 	}
 	closedir(dir_p);
 }
@@ -213,6 +239,7 @@ void parse_options(char* options) {
 		case '1': display_patern = one_item_per_line; break;
 		case 'A': _A_ignore_dotdot = true; break;
 		case 'U': sort_type = sort_none; break;
+		case 'c': sort_type = sort_inode_time; break; // 按照inode修改时间排序
 		default: break;
 		}
 	}
@@ -222,45 +249,65 @@ void sort_pending(void) {
 	struct pending_file *ptr_pending;
 	ptr_pending = pending_file; //临时指针
 
-								//计数总共有多少待处理的文件
+	//计数总共有多少待处理的文件
 	while (ptr_pending->next != NULL) {
 		num_of_total_files++;
 		ptr_pending = ptr_pending->next;
 	}
 
-	//开始排序 
-	//按照名字排序 - 选择排序
-	if (sort_type == sort_name) {
-		// default sort type
-		struct pending_file *pfirst, *ptail; //新建的临时链表，临时链表没有空节点头
-		struct pending_file *pminBefore, *pmin, *p; // p 当前比较的节点
+	if (sort_type == sort_inode_time){
+		struct stat	file_stat;
+		time_t p_time, pnext_time;		
+	}
 
-		ptr_pending = pending_file;
-		pfirst = ptail = NULL;
-		while (ptr_pending->next != NULL) {
-			//寻找最小值
-			for (p = ptr_pending->next, pmin = ptr_pending->next, pminBefore = ptr_pending; p->next != NULL; p = p->next) {
+	//开始排序 - 选择排序
+
+	// default sort type
+	struct pending_file *pfirst, *ptail; //新建的临时链表，临时链表没有空节点头
+	struct pending_file *pminBefore, *pmin, *p; // p 当前比较的节点
+
+	ptr_pending = pending_file;
+	pfirst = ptail = NULL;
+	while (ptr_pending->next != NULL) {
+		//寻找最小值
+		for (p = ptr_pending->next, pmin = ptr_pending->next, pminBefore = ptr_pending; p->next != NULL; p = p->next) {
+			if (sort_type == sort_name) { //sort by name
 				if (strcmp(p->next->dir->d_name, pmin->dir->d_name) < 0) { //找到一个比当前min小的节点(p->next)
 					pminBefore = p;
 					pmin = p->next;
 				}
 			}
-
-			//将最小值插入临时链表，并从旧链表中删除
-			if (pfirst == NULL) {
-				pfirst = pmin;
-				ptail = pmin;
+			else if (sort_type == sort_inode_time){ // sort by inode modify time -- ctime
+				if (p->next->file_stat.st_ctime >= pmin->file_stat.st_ctime){ //sort by ctime
+					if (p->next->file_stat.st_ctime == pmin->file_stat.st_ctime && p->next->file_stat.st_ctimensec <= pmin->file_stat.st_ctimensec){
+						continue;
+					}
+					pminBefore = p;
+					pmin = p->next;
+				}/*
+				else if (p->next->file_stat.st_ctime = pmin->file_stat.st_ctime && p->next->file_stat.st_ctimensec > pmin->file_stat.st_ctimensec){
+					pminBefore = p;
+					pmin = p->next;
+				}*/
 			}
-			else {
-				ptail->next = pmin;
-				ptail = pmin;
-			}
-			pminBefore->next = pmin->next;
+				
 		}
-		ptail->next = NULL;
-		pending_file->next = pfirst;
+		//将最小值插入临时链表，并从旧链表中删除
+		if (pfirst == NULL) {
+			pfirst = pmin;
+			ptail = pmin;
+		}
+		else {
+			ptail->next = pmin;
+			ptail = pmin;
+		}
+		pminBefore->next = pmin->next;
 	}
-	// sort by name finished
+	ptail->next = NULL;
+	pending_file->next = pfirst;
+	
+	// sort finished
+
 }
 
 // 得到终端的列数和行数  
