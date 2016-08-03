@@ -1,5 +1,5 @@
 //a simple ls demo 
-//support -1acAU options
+//support -1acdAU options
 #include <sys/stat.h>
 #include <stdio.h>
 #include <dirent.h>
@@ -79,7 +79,10 @@ struct output_format output_format;
 
 static int tab_size = 2; //默认的间隔宽度
 
-static char input_dir_name[MAX_BUF_LEN];
+static char input_dir_name[MAX_BUF_LEN]; //the name of input directory
+
+//-d option: list directory entries instead of contents, and do not dereference symbolic links
+bool _d_list_dir_only;
 
 void print_dir(const char *dir_name); //打印指定目录
 void initial_pattern(void); //初始化各种参数
@@ -200,6 +203,21 @@ void readdir_to_pending(char * dir_name) {
 	dir_p = opendir(dir_name);
 	struct pending_file * pending_tail;
 	pending_tail = pending_file; // 链表尾
+
+	//-d option only have one dir to be listed
+	if (_d_list_dir_only == true){
+		pending_tail->next = (struct pending_file*)malloc(sizeof(struct pending_file));
+		pending_tail = pending_tail->next;
+		pending_tail->dir = (struct	dirent*)malloc(sizeof(struct dirent));
+		strcpy(pending_tail->dir->d_name, dir_name);
+		strcpy(pending_tail->file_path, dir_name);
+		if (lstat(pending_tail->file_path, &(pending_tail->file_stat)) < 0) {
+			printf("Error with lstat");
+			exit(0);
+		}
+		return;
+	}
+
 	while (dir = readdir(dir_p)) {
 		if ((!_A_ignore_dotdot && !_a_not_ignore_dot) && dir->d_name[0] == '.') {
 			// -a option
@@ -240,6 +258,7 @@ void parse_options(char* options) {
 		case 'A': _A_ignore_dotdot = true; break;
 		case 'U': sort_type = sort_none; break;
 		case 'c': sort_type = sort_inode_time; break; // 按照inode修改时间排序
+		case 'd': _d_list_dir_only = true;
 		default: break;
 		}
 	}
